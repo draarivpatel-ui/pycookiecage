@@ -9,6 +9,11 @@ from pycookiecage import parse_cookie_header, serialize_cookie, sign_cookie_valu
 from _support import NOW_MS, STRONG_KEY, STRONG_KEY_2, assert_error_code
 
 
+class EncodeBomb(str):
+    def encode(self, *args, **kwargs):
+        raise AssertionError("input was re-encoded instead of counted in place")
+
+
 class SerializationRegressionTests(unittest.TestCase):
     def test_nan_max_age_rejects(self):
         assert_error_code(self, "INVALID_MAX_AGE", serialize_cookie, "sid", "abc", max_age=float("nan"))
@@ -43,6 +48,9 @@ class SerializationRegressionTests(unittest.TestCase):
 
     def test_lone_surrogate_value_rejects_with_typed_error(self):
         assert_error_code(self, "NON_ASCII", serialize_cookie, "sid", "a\ud800b")
+
+    def test_oversize_serialize_value_rejects_without_reencoding_input(self):
+        assert_error_code(self, "LIMIT_EXCEEDED", serialize_cookie, "sid", EncodeBomb("x" * 5000))
 
     def test_lone_surrogate_domain_rejects_with_typed_error(self):
         assert_error_code(self, "NON_ASCII", serialize_cookie, "sid", "abc", domain="exa\ud800mple.com")
@@ -92,6 +100,13 @@ class ParserRegressionTests(unittest.TestCase):
 
     def test_header_bound_rejects_one_byte_over(self):
         assert_error_code(self, "LIMIT_EXCEEDED", parse_cookie_header, "a=1", max_header_bytes=2)
+
+    def test_multibyte_characters_count_toward_header_byte_limit(self):
+        assert_error_code(self, "LIMIT_EXCEEDED", parse_cookie_header, "sid=" + "\u00e9" * 5001, max_header_bytes=10000)
+
+    def test_oversize_header_rejects_without_reencoding_input(self):
+        header = EncodeBomb("x" * 100 + "=1")
+        assert_error_code(self, "LIMIT_EXCEEDED", parse_cookie_header, header, max_header_bytes=10)
 
     def test_single_cookie_at_default_segment_bound_accepts(self):
         value_length = 4096 - len("sid=")
@@ -168,6 +183,13 @@ class SigningRegressionTests(unittest.TestCase):
     def test_oversized_signed_value_rejects_before_parsing(self):
         signed = "v1.k1.0." + "A" * 4100 + "." + "A" * 43
         assert_error_code(self, "LIMIT_EXCEEDED", verify_cookie_value, "sid", signed, STRONG_KEY, now=NOW_MS)
+
+    def test_oversized_signed_value_rejects_without_reencoding_input(self):
+        signed = EncodeBomb("v1.k1.0." + "A" * 4100 + "." + "A" * 43)
+        assert_error_code(self, "LIMIT_EXCEEDED", verify_cookie_value, "sid", signed, STRONG_KEY, now=NOW_MS)
+
+    def test_oversize_signing_value_rejects_without_reencoding_input(self):
+        assert_error_code(self, "LIMIT_EXCEEDED", sign_cookie_value, "sid", EncodeBomb("x" * 5000), STRONG_KEY, now=NOW_MS)
 
     def test_expiration_overflow_rejects(self):
         assert_error_code(

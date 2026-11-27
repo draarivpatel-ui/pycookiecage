@@ -38,6 +38,7 @@ CRLF_RE = re.compile(r"[\r\n]")
 CONTROL_RE = re.compile(r"[\x00-\x1F\x7F-\x9F]")
 NON_ASCII_RE = re.compile(r"[^\x00-\x7F]")
 IPV4_SHAPE_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\Z")
+NUMERIC_HOST_PART_RE = re.compile(r"^(?:0[xX][0-9A-Fa-f]+|[0-9]+)\Z")
 DNS_LABEL_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\Z")
 
 COMMON_PUBLIC_SUFFIXES = frozenset(
@@ -67,11 +68,21 @@ def fail(code: str, message: str, field: Optional[str] = None) -> None:
     raise CookieCageError(code, message, field=field) from None
 
 
-def byte_length(text: str) -> int:
-    try:
-        return len(text.encode("utf-8"))
-    except UnicodeEncodeError:
-        return len(text.encode("utf-8", "surrogatepass"))
+def utf8_byte_length_exceeds(text: str, limit: int) -> bool:
+    total = 0
+    for char in text:
+        codepoint = ord(char)
+        if codepoint < 0x80:
+            total += 1
+        elif codepoint < 0x800:
+            total += 2
+        elif codepoint < 0x10000:
+            total += 3
+        else:
+            total += 4
+        if total > limit:
+            return True
+    return False
 
 
 def validate_header_text(text: str, field: str) -> None:
@@ -89,11 +100,13 @@ def validate_header_text(text: str, field: str) -> None:
 
 
 def validate_cookie_name(name: str, field: str = "name") -> str:
+    if not isinstance(name, str):
+        fail(INVALID_INPUT, field + " must be a string", field)
+    if len(name) > MAX_NAME_BYTES or utf8_byte_length_exceeds(name, MAX_NAME_BYTES):
+        fail(LIMIT_EXCEEDED, "cookie name exceeds the 4096 byte limit", field)
     validate_header_text(name, field)
     if len(name) == 0:
         fail(INVALID_NAME, "cookie name must not be empty", field)
-    if byte_length(name) > MAX_NAME_BYTES:
-        fail(LIMIT_EXCEEDED, "cookie name exceeds the 4096 byte limit", field)
     if not TOKEN_RE.fullmatch(name):
         fail(INVALID_NAME, "cookie name is not an RFC 6265 token", field)
     return name
@@ -102,8 +115,7 @@ def validate_cookie_name(name: str, field: str = "name") -> str:
 def validate_cookie_value(value: str, field: str = "value", *, max_bytes: int = MAX_VALUE_BYTES) -> str:
     if not isinstance(value, str):
         fail(INVALID_INPUT, field + " must be a string", field)
-    size = byte_length(value)
-    if size > max_bytes:
+    if len(value) > max_bytes or utf8_byte_length_exceeds(value, max_bytes):
         fail(LIMIT_EXCEEDED, field + " exceeds the configured byte limit", field)
     if COOKIE_OCTET_RE.fullmatch(value):
         return value
@@ -157,6 +169,8 @@ def validate_domain(domain: str) -> str:
     labels = normalized.split(".")
     if any(len(label) == 0 or len(label) > 63 or not DNS_LABEL_RE.fullmatch(label) for label in labels):
         fail(INVALID_DOMAIN, "domain contains an invalid DNS label", "domain")
+    if len(labels) >= 2 and all(NUMERIC_HOST_PART_RE.fullmatch(label) is not None for label in labels):
+        fail(INVALID_DOMAIN, "domain numeric IP literal forms are not allowed", "domain")
     if len(labels) < 2:
         fail(INVALID_DOMAIN, "domain must not be a bare top-level or single-label name", "domain")
     if normalized in COMMON_PUBLIC_SUFFIXES:

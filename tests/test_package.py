@@ -2,6 +2,7 @@
 
 import ast
 import re
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -38,6 +39,7 @@ class PackageMetadataTests(unittest.TestCase):
         text = read("pyproject.toml")
         self.assertIn('name = "pycookiecage"', text)
         self.assertIn('version = "1.0.0"', text)
+        self.assertIn('license = "MIT"', text)
         self.assertEqual("1.0.0", pycookiecage.__version__)
 
     def test_project_urls_point_to_public_repository(self):
@@ -58,6 +60,9 @@ class PackageMetadataTests(unittest.TestCase):
 
     def test_console_script_is_configured(self):
         self.assertIn('pycookiecage = "pycookiecage.cli:main"', read("pyproject.toml"))
+
+    def test_manifest_includes_complete_test_tree(self):
+        self.assertIn("recursive-include tests *.py", read("MANIFEST.in"))
 
 
 class WorkflowTests(unittest.TestCase):
@@ -98,6 +103,7 @@ class DocumentationTests(unittest.TestCase):
             "SECURITY.md",
             "CONTRIBUTING.md",
             "LICENSE",
+            "MANIFEST.in",
             "docs/good-first-issues.md",
             ".github/PULL_REQUEST_TEMPLATE.md",
             ".github/ISSUE_TEMPLATE/bug_report.md",
@@ -186,6 +192,7 @@ class SourceHygieneTests(unittest.TestCase):
             "hashlib",
             "hmac",
             "json",
+            "math",
             "re",
             "struct",
             "sys",
@@ -225,8 +232,20 @@ class SourceHygieneTests(unittest.TestCase):
             for marker in markers:
                 self.assertNotIn(marker, text, "{} contains a private marker".format(path))
 
-    def test_no_pycache_files_in_repository(self):
-        matches = [path for path in ROOT.rglob("*") if "__pycache__" in path.parts]
+    def test_no_pycache_files_are_tracked(self):
+        completed = subprocess.run(
+            ["git", "ls-files"],
+            cwd=str(ROOT),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+            check=False,
+        )
+        if completed.returncode != 0 and not (ROOT / ".git").exists():
+            self.skipTest("git metadata is not available")
+        self.assertEqual(0, completed.returncode)
+        tracked = completed.stdout.splitlines()
+        matches = [name for name in tracked if "__pycache__/" in name or name.endswith((".pyc", ".pyo"))]
         self.assertEqual([], matches)
 
     def test_no_crlf_line_endings_in_text_files(self):

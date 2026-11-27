@@ -14,10 +14,10 @@ from .errors import (
 )
 from .validation import (
     MAX_CONFIG_LIMIT,
-    byte_length,
     fail,
     validate_cookie_name,
     validate_cookie_value,
+    utf8_byte_length_exceeds,
     validate_header_text,
     validate_positive_limit,
 )
@@ -70,8 +70,7 @@ def parse_cookie_header(
 
     if not isinstance(header, str):
         fail(INVALID_INPUT, "header must be a string", "header")
-    header_size = byte_length(header)
-    if header_size > max_header_bytes:
+    if len(header) > max_header_bytes or utf8_byte_length_exceeds(header, max_header_bytes):
         fail(LIMIT_EXCEEDED, "Cookie header exceeds the configured byte limit", "header")
     validate_header_text(header, "header")
     if len(header) == 0:
@@ -95,7 +94,7 @@ def parse_cookie_header(
         segment = raw_segment[content_start:]
         if len(segment) == 0:
             fail(PARSE_ERROR, "Cookie header contains an empty cookie segment", "header")
-        if byte_length(segment) > max_cookie_bytes:
+        if len(segment) > max_cookie_bytes:
             fail(LIMIT_EXCEEDED, "cookie segment exceeds the configured byte limit", "cookie")
 
         equals = segment.find("=")

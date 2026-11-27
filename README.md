@@ -122,7 +122,7 @@ Verification behavior:
 - Wrong key ids, cross-cookie substitution, expiration tampering, payload tampering, truncated tags, malformed UTF-8 payloads, and noncanonical encodings fail closed.
 - Errors never echo the raw secret or cookie value.
 
-Keys must be at least 32 bytes, contain at least 8 distinct byte values, and must not look like placeholders. `allow_weak_keys=True` exists only for deterministic tests and local fixtures. Do not enable it in production.
+Keys must be at least 32 bytes, contain at least 8 distinct byte values, pass a 128 bit Shannon entropy screening estimate, and must not look like placeholders or obvious repeating or arithmetic byte patterns. Screening cannot prove how a key was generated. Labeled PEM or OpenSSH asymmetric key material always rejects because it must not be confused with an HMAC secret. `allow_weak_keys=True` bypasses only the length, diversity, entropy, pattern, and placeholder checks for deterministic tests and local fixtures. Do not enable it in production.
 
 `now` is an integer Unix epoch timestamp in milliseconds or a timezone-aware `datetime`. `max_age` is in seconds.
 
@@ -178,7 +178,7 @@ Branch on `exc.code`, not the human-readable message. The stable exported list i
 
 - HMAC-SHA256 is the only built-in cryptographic primitive. There is no encryption, no confidentiality, no asymmetric cryptography, no key fetching, no KMS integration, and no framework middleware.
 - Signed cookies are integrity-protected but still readable by the client.
-- The library does not vendor the full Public Suffix List. Domain validation is conservative and rejects single-label names, bare TLDs, IP literals, malformed DNS labels, and a built-in set of common multi-part public suffixes. Applications with strict domain requirements should validate their own exact allowed domains.
+- The library does not vendor the full Public Suffix List. Domain validation is conservative and rejects single-label names, bare TLDs, IPv4 and IPv6 literals, ambiguous all-numeric IPv4 spellings, malformed DNS labels, and a built-in set of common multi-part public suffixes. Applications with strict domain requirements should validate their own exact allowed domains.
 - The parser handles one already reconstructed Cookie header value. It does not combine multiple header fields.
 - The parser does not percent-decode values. Percent decoding is application-specific and can create parser differentials when applied implicitly.
 - The serializer emits unquoted cookie-octet values. It does not automatically quote or percent-encode values.
@@ -187,7 +187,7 @@ Branch on `exc.code`, not the human-readable message. The stable exported list i
 
 ## Test evidence and development
 
-The offline unittest suite currently contains 563 real deterministic tests covering RFC 6265 validation, case-insensitive prefixes, attribute invariants, CRLF and smuggling rejection, cookie-tossing defenses, parser bounds, HMAC framing, rotation, canonical base64url, expiry, weak-key rejection, the guard, the CLI, typing exports, packaging, and repository hygiene. All 563 tests passed in the local verification run for this commit.
+The offline unittest suite currently contains 585 real deterministic tests covering RFC 6265 validation, case-insensitive prefixes, attribute invariants, CRLF and smuggling rejection, cookie-tossing defenses, parser bounds, HMAC framing, rotation, canonical base64url, expiry, weak-key rejection, the guard, the CLI, typing exports, packaging, and repository hygiene. All 585 tests passed in the local verification run for this commit.
 
 Run the suite with:
 

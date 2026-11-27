@@ -11,6 +11,7 @@ import base64
 import datetime as _datetime
 import hashlib
 import hmac
+import math
 import re
 import struct
 import time
@@ -28,8 +29,8 @@ from .errors import (
     WEAK_KEY,
 )
 from .validation import (
-    byte_length,
     fail,
+    utf8_byte_length_exceeds,
     validate_cookie_name,
     validate_header_text,
     validate_max_age,
@@ -37,13 +38,31 @@ from .validation import (
 )
 
 MIN_SECRET_BYTES = 32
+MIN_SECRET_ENTROPY_BITS = 128
 MAX_KEYRING_KEYS = 32
 MAX_SIGN_VALUE_BYTES = 4096
 MAX_SIGNED_BYTES = 4096
 MAX_EXPIRY_MS = 9999999999999999
+_UNIX_EPOCH = _datetime.datetime(1970, 1, 1, tzinfo=_datetime.timezone.utc)
 
 KEY_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}\Z")
 EXPIRY_RE = re.compile(r"^[0-9]{1,16}\Z")
+PEM_MARKER_RE = re.compile(rb"-----BEGIN [A-Z0-9][A-Z0-9 -]{0,79}-----", re.IGNORECASE)
+OPENSSH_KEY_TYPES = frozenset(
+    (
+        b"ssh-rsa",
+        b"ssh-dss",
+        b"rsa-sha2-256",
+        b"rsa-sha2-512",
+        b"ssh-ed25519",
+        b"ecdsa-sha2-nistp256",
+        b"ecdsa-sha2-nistp384",
+        b"ecdsa-sha2-nistp521",
+        b"sk-ssh-ed25519@openssh.com",
+        b"sk-ecdsa-sha2-nistp256@openssh.com",
+    )
+)
+OPENSSH_TOKEN_EDGE_CHARS = b"'\"`;,[](){}"
 BASE64URL_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 BASE64URL_RE = re.compile(r"^[A-Za-z0-9_-]*\Z")
 PLACEHOLDER_SECRET_PREFIXES = (
@@ -108,6 +127,55 @@ def _validate_key_id(key_id: object) -> str:
     return key_id
 
 
+def _shannon_entropy_bits(data: bytes) -> float:
+    if not data:
+        return 0.0
+    counts = [0] * 256
+    for byte in data:
+        counts[byte] += 1
+    length = float(len(data))
+    bits_per_byte = 0.0
+    for count in counts:
+        if count:
+            probability = count / length
+            bits_per_byte -= probability * math.log2(probability)
+    return bits_per_byte * length
+
+
+def _has_obvious_period(data: bytes) -> bool:
+    sample = data[:512]
+    size = len(sample)
+    if size < 16:
+        return False
+    max_period = min(256, size // 2)
+    for period in range(1, max_period + 1):
+        if sample[period:] == sample[:-period]:
+            return True
+    return False
+
+
+def _has_dominant_arithmetic_difference(data: bytes) -> bool:
+    sample = data[:512]
+    size = len(sample)
+    if size < 24:
+        return False
+    counts = [0] * 256
+    for index in range(1, size):
+        counts[(sample[index] - sample[index - 1]) % 256] += 1
+    return max(counts) * 5 >= (size - 1) * 4
+
+
+def _looks_like_labeled_asymmetric_key(data: bytes) -> bool:
+    sample = data[:4096]
+    if PEM_MARKER_RE.search(sample) is not None:
+        return True
+    lowered = sample.lower()
+    for token in lowered.split():
+        if token.strip(OPENSSH_TOKEN_EDGE_CHARS) in OPENSSH_KEY_TYPES:
+            return True
+    return False
+
+
 def _normalize_secret(secret: SecretInput, *, allow_weak_keys: bool) -> bytes:
     if isinstance(secret, str):
         if len(secret) == 0:
@@ -125,12 +193,18 @@ def _normalize_secret(secret: SecretInput, *, allow_weak_keys: bool) -> bytes:
     else:
         fail(INVALID_KEYRING, "key secret must be a string or bytes-like object")
 
+    if _looks_like_labeled_asymmetric_key(data):
+        fail(WEAK_KEY, "labeled asymmetric key material must not be used as an HMAC secret")
     if allow_weak_keys:
         return data
     if len(data) < MIN_SECRET_BYTES:
         fail(WEAK_KEY, "secret is shorter than the required minimum length")
     if len(set(data)) < 8:
         fail(WEAK_KEY, "secret does not contain enough byte diversity")
+    if _shannon_entropy_bits(data) < MIN_SECRET_ENTROPY_BITS:
+        fail(WEAK_KEY, "secret does not meet the minimum estimated entropy floor")
+    if _has_obvious_period(data) or _has_dominant_arithmetic_difference(data):
+        fail(WEAK_KEY, "secret has an obvious repeating or sequential byte pattern")
     lowered = data.lower()
     for prefix in PLACEHOLDER_SECRET_PREFIXES:
         if lowered.startswith(prefix):
@@ -168,12 +242,14 @@ def _read_now(value: Optional[Union[int, _datetime.datetime]]) -> int:
         if value.tzinfo is None or value.utcoffset() is None:
             fail(INVALID_OPTIONS, "now datetime must be timezone-aware", "now")
         try:
-            timestamp = value.timestamp() * 1000
+            utc_value = value.astimezone(_datetime.timezone.utc)
+            delta = utc_value - _UNIX_EPOCH
         except (OverflowError, ValueError):
             fail(INVALID_OPTIONS, "now datetime is outside the supported timestamp range", "now")
+        timestamp = (delta.days * 86400 + delta.seconds) * 1000 + delta.microseconds // 1000
         if timestamp < 0 or timestamp > MAX_EXPIRY_MS:
             fail(INVALID_OPTIONS, "now is outside the supported timestamp range", "now")
-        return int(timestamp)
+        return timestamp
     if type(value) is not int or value < 0 or value > MAX_EXPIRY_MS:
         fail(INVALID_OPTIONS, "now must be a nonnegative integer millisecond timestamp or timezone-aware datetime", "now")
     return value
@@ -249,6 +325,8 @@ def sign_cookie_value(
     checked_name = validate_cookie_name(name)
     if not isinstance(value, str):
         fail(INVALID_INPUT, "value must be a string", "value")
+    if len(value) > MAX_SIGN_VALUE_BYTES:
+        fail(LIMIT_EXCEEDED, "value exceeds the 4096 byte signing limit", "value")
     try:
         value_bytes = value.encode("utf-8")
     except UnicodeEncodeError:
@@ -279,7 +357,7 @@ def sign_cookie_value(
 def _parse_signed_value(signed_value: str, *, max_signed_bytes: int = MAX_SIGNED_BYTES) -> _ParsedSignedValue:
     if not isinstance(signed_value, str):
         fail(INVALID_INPUT, "signed_value must be a string", "signed_value")
-    if byte_length(signed_value) > max_signed_bytes:
+    if len(signed_value) > max_signed_bytes or utf8_byte_length_exceeds(signed_value, max_signed_bytes):
         fail(LIMIT_EXCEEDED, "signed value exceeds the configured byte limit", "signed_value")
     validate_header_text(signed_value, "signed_value")
     parts = signed_value.split(".")
@@ -360,6 +438,7 @@ __all__ = [
     "MAX_SIGNED_BYTES",
     "MAX_SIGN_VALUE_BYTES",
     "MIN_SECRET_BYTES",
+    "MIN_SECRET_ENTROPY_BITS",
     "KeyringInput",
     "SecretInput",
     "VerifiedCookie",

@@ -16,7 +16,6 @@ from .validation import (
     MAX_SERIALIZED_BYTES,
     MAX_VALUE_BYTES,
     ascii_startswith_ignore_case,
-    byte_length,
     fail,
     validate_cookie_name,
     validate_cookie_value,
@@ -115,7 +114,7 @@ def serialize_cookie(
     if partitioned:
         output += "; Partitioned"
 
-    if byte_length(output) > MAX_SERIALIZED_BYTES:
+    if len(output) > MAX_SERIALIZED_BYTES:
         fail(LIMIT_EXCEEDED, "serialized cookie exceeds the 4096 byte limit")
     return output
 

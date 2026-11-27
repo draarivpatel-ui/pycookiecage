@@ -7,7 +7,16 @@ import unittest
 import pycookiecage.signing as signing_module
 from pycookiecage import sign_cookie_value, verify_cookie_value
 
-from _support import NOW_MS, STRONG_KEY, STRONG_KEY_2, STRONG_KEY_3, UTC, WEAK_KEY, assert_error_code
+from _support import (
+    NOW_MS,
+    STRONG_KEY,
+    STRONG_KEY_2,
+    STRONG_KEY_3,
+    UTC,
+    WEAK_KEY,
+    assert_error_code,
+    derived_test_key,
+)
 
 
 def _add_test(cls, name, func):
@@ -73,6 +82,14 @@ class SigningRoundTripTests(unittest.TestCase):
         signed = sign_cookie_value("sid", "abc", STRONG_KEY, now=moment, max_age=10)
         result = verify_cookie_value("sid", signed, STRONG_KEY, now=NOW_MS + 1)
         self.assertEqual(NOW_MS + 10000, result.expires_at)
+
+    def test_datetime_now_uses_exact_millisecond_arithmetic(self):
+        exact_ms = 137722132837003
+        epoch = datetime.datetime(1970, 1, 1, tzinfo=UTC)
+        moment = epoch + datetime.timedelta(milliseconds=exact_ms)
+        signed = sign_cookie_value("sid", "abc", STRONG_KEY, now=moment, max_age=1)
+        result = verify_cookie_value("sid", signed, STRONG_KEY, now=exact_ms)
+        self.assertEqual(exact_ms + 1000, result.expires_at)
 
     def test_max_age_sets_expiry(self):
         signed = _sign(max_age=60)
@@ -145,6 +162,42 @@ class SigningKeyTests(unittest.TestCase):
         signed = sign_cookie_value("sid", "abc", key, now=NOW_MS)
         self.assertEqual("abc", verify_cookie_value("sid", signed, key, now=NOW_MS).value)
 
+    def test_hex_encoded_high_entropy_secret_accepted(self):
+        key = STRONG_KEY.hex()
+        signed = sign_cookie_value("sid", "abc", key, now=NOW_MS)
+        self.assertEqual("abc", verify_cookie_value("sid", signed, key, now=NOW_MS).value)
+
+    def test_obvious_periodic_secret_rejects(self):
+        assert_error_code(self, "WEAK_KEY", sign_cookie_value, "sid", "abc", b"0123456789abcdef" * 2, now=NOW_MS)
+
+    def test_arithmetic_sequence_secret_rejects(self):
+        assert_error_code(self, "WEAK_KEY", sign_cookie_value, "sid", "abc", bytes(range(32)), now=NOW_MS)
+
+    def test_low_entropy_alphabet_secret_rejects(self):
+        secret = bytes([
+            0, 1, 2, 3, 4, 5, 6, 7,
+            7, 6, 5, 4, 3, 2, 1, 0,
+            0, 2, 4, 6, 1, 3, 5, 7,
+            7, 5, 3, 1, 6, 4, 2, 0,
+        ])
+        assert_error_code(self, "WEAK_KEY", sign_cookie_value, "sid", "abc", secret, now=NOW_MS)
+
+    def test_pem_private_key_rejects_even_with_allow_weak(self):
+        secret = "-----BEGIN PRIVATE KEY-----\n" + STRONG_KEY.hex() + "\n-----END PRIVATE KEY-----"
+        assert_error_code(self, "WEAK_KEY", sign_cookie_value, "sid", "abc", secret, now=NOW_MS, allow_weak_keys=True)
+
+    def test_pem_public_key_rejects_even_with_allow_weak(self):
+        secret = "-----BEGIN PUBLIC KEY-----\n" + STRONG_KEY.hex() + "\n-----END PUBLIC KEY-----"
+        assert_error_code(self, "WEAK_KEY", sign_cookie_value, "sid", "abc", secret, now=NOW_MS, allow_weak_keys=True)
+
+    def test_pem_certificate_rejects_even_with_allow_weak(self):
+        secret = "-----BEGIN CERTIFICATE-----\n" + STRONG_KEY.hex() + "\n-----END CERTIFICATE-----"
+        assert_error_code(self, "WEAK_KEY", sign_cookie_value, "sid", "abc", secret, now=NOW_MS, allow_weak_keys=True)
+
+    def test_openssh_public_key_rejects_even_with_allow_weak(self):
+        secret = "ssh-ed25519 " + STRONG_KEY.hex()
+        assert_error_code(self, "WEAK_KEY", sign_cookie_value, "sid", "abc", secret, now=NOW_MS, allow_weak_keys=True)
+
     def test_weak_key_can_be_enabled_explicitly(self):
         signed = sign_cookie_value("sid", "abc", WEAK_KEY, now=NOW_MS, allow_weak_keys=True)
         result = verify_cookie_value("sid", signed, WEAK_KEY, now=NOW_MS, allow_weak_keys=True)
@@ -196,14 +249,14 @@ class SigningKeyTests(unittest.TestCase):
     def test_maximum_32_keys_accepted(self):
         keyring = {}
         for index in range(32):
-            keyring["k{:02d}".format(index)] = bytes((index + offset) % 256 for offset in range(32))
+            keyring["k{:02d}".format(index)] = derived_test_key("ring-{:02d}".format(index).encode("ascii"))
         signed = sign_cookie_value("sid", "abc", keyring, now=NOW_MS)
         self.assertEqual("abc", verify_cookie_value("sid", signed, keyring, now=NOW_MS).value)
 
     def test_33_keys_reject(self):
         keyring = {}
         for index in range(33):
-            keyring["k{:02d}".format(index)] = bytes((index + offset) % 256 for offset in range(32))
+            keyring["k{:02d}".format(index)] = derived_test_key("ring-extra-{:02d}".format(index).encode("ascii"))
         assert_error_code(self, "INVALID_KEYRING", sign_cookie_value, "sid", "abc", keyring, now=NOW_MS)
 
     def test_empty_keyring_rejects(self):

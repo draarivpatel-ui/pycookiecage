@@ -1,12 +1,18 @@
 """Shared deterministic test helpers."""
 
 import datetime
+import hashlib
 
 from pycookiecage import CookieCageError
 
-STRONG_KEY = bytes(range(32))
-STRONG_KEY_2 = bytes(range(32, 64))
-STRONG_KEY_3 = bytes((index * 7 + 11) % 256 for index in range(32))
+
+def derived_test_key(label):
+    return hashlib.sha256(b"pycookiecage-test-key-" + label).digest()
+
+
+STRONG_KEY = derived_test_key(b"one")
+STRONG_KEY_2 = derived_test_key(b"two")
+STRONG_KEY_3 = derived_test_key(b"three")
 WEAK_KEY = b"x"
 NOW_MS = 1700000000000
 UTC = datetime.timezone.utc
