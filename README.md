@@ -1,5 +1,7 @@
 # pycookiecage
 
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/draarivpatel-ui/pycookiecage/badge)](https://scorecard.dev/viewer/?uri=github.com/draarivpatel-ui/pycookiecage)
+
 Zero-dependency Python library for strict RFC 6265 cookie serialization, strict incoming Cookie header parsing, case-insensitive `__Host-` and `__Secure-` prefix enforcement, cookie-tossing duplicate rejection, and constant-time HMAC-SHA256 signed cookie values.
 
 pycookiecage is the Python stdlib companion to the JavaScript `cookiecage` package. It is defensive only. It performs no network access, filesystem access, subprocess execution, browser interaction, or framework integration.

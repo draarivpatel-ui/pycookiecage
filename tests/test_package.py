@@ -75,7 +75,9 @@ class WorkflowTests(unittest.TestCase):
             self.assertIn('"' + version + '"', text)
 
     def test_ci_runs_unittest_suite(self):
-        self.assertIn("PYTHONPATH=src python3 -m unittest discover -s tests", read(".github/workflows/ci.yml"))
+        text = read(".github/workflows/ci.yml")
+        self.assertIn("PYTHONPATH: src", text)
+        self.assertIn("python -m unittest discover -s tests", text)
 
     def test_ci_permissions_are_read_only(self):
         self.assertIn("contents: read", read(".github/workflows/ci.yml"))
@@ -83,7 +85,8 @@ class WorkflowTests(unittest.TestCase):
     def test_publish_uses_oidc_trusted_publishing_permission(self):
         text = read(".github/workflows/publish.yml")
         self.assertIn("id-token: write", text)
-        self.assertIn("pypa/gh-action-pypi-publish@release/v1", text)
+        self.assertIn("pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086", text)
+        self.assertNotIn("pypa/gh-action-pypi-publish@release/v1", text)
 
     def test_publish_workflow_targets_pypi_environment(self):
         text = read(".github/workflows/publish.yml")
@@ -141,7 +144,9 @@ class DocumentationTests(unittest.TestCase):
         self.assertEqual(contains.group(1), passed.group(1))
 
     def test_security_policy_has_private_reporting_path(self):
-        self.assertIn("private security advisory", read("SECURITY.md"))
+        text = read("SECURITY.md")
+        self.assertIn("GitHub private vulnerability reporting", text)
+        self.assertIn("https://github.com/draarivpatel-ui/pycookiecage/security/advisories/new", text)
 
     def test_contributing_forbids_dashes(self):
         self.assertIn("em dashes or en dashes", read("CONTRIBUTING.md"))
