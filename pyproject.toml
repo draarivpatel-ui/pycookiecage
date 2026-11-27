@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pycookiecage"
+version = "1.0.0"
+description = "Zero-dependency hardened RFC 6265 cookie parsing, serialization, and HMAC signing"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "pycookiecage contributors" }]
+keywords = ["cookies", "rfc6265", "security", "hmac", "cookie-tossing"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = []
+
+[project.scripts]
+pycookiecage = "pycookiecage.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/draarivpatel-ui/pycookiecage"
+Repository = "https://github.com/draarivpatel-ui/pycookiecage"
+Issues = "https://github.com/draarivpatel-ui/pycookiecage/issues"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+pycookiecage = ["py.typed"]
