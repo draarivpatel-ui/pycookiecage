@@ -356,6 +356,10 @@ def _domain_matrix():
         "xn--bcher-kva.example",
         "127.example.com",
         "example.123",
+        "EXAMPLE.COM",
+        "ExAmPlE.CoM",
+        "MiXeD.Sub.Example.COM",
+        ("a" * 63) + ".example",
     ]
     for index, domain in enumerate(valid):
         def check(self, domain=domain):
@@ -389,6 +393,11 @@ def _domain_matrix():
         ("cr", "example.com\r"),
         ("lf", "example.com\n"),
         ("tab", "example.com\t"),
+        ("numeric_single", "2130706433"),
+        ("numeric_two_part", "127.1"),
+        ("numeric_leading_zero", "0177.0.0.1"),
+        ("numeric_hex", "0x7f000001"),
+        ("repeated_dots", "example...com"),
     ]
     for label, domain in invalid:
         def check(self, domain=domain):
